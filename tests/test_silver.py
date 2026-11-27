@@ -362,7 +362,7 @@ def test_silver_validation_returns_metrics(tmp_path):
 
     with duckdb.connect() as connection:
         connection.execute(
-            """
+            f"""
             COPY (
                 SELECT
                     'Brazil' AS country,
@@ -389,17 +389,16 @@ def test_silver_validation_rejects_empty_dataset(tmp_path):
 
     with duckdb.connect() as connection:
         connection.execute(
-            """
+            f"""
             COPY (
                 SELECT
                     CAST(NULL AS VARCHAR) AS country,
                     CAST(NULL AS DATE) AS date
                 WHERE FALSE
             )
-            TO ?
+            TO '{parquet_file.as_posix()}'
             (FORMAT PARQUET)
-            """,
-            [str(parquet_file)],
+            """
         )
 
     with pytest.raises(ValueError, match="dataset is empty"):
