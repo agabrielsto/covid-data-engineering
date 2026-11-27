@@ -52,13 +52,17 @@ def test_load_parquet_raises_error_when_file_not_found(tmp_path):
 
 
 import os
-
-import psycopg
+import pytest
 
 from src.gold.load_gold_postgres import load_into_postgres
 
 
 def test_load_into_postgres():
+    psycopg = pytest.importorskip(
+        "psycopg",
+        reason="PostgreSQL integration test requires a working psycopg installation",
+    )
+
     rows = [
         (
             "Brazil", "BRA", "South America",
