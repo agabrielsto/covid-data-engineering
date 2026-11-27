@@ -1,7 +1,11 @@
 
 import duckdb
+import pytest
 
-from src.gold.build_country_indicators import build_country_indicators
+from src.gold.build_country_indicators import (
+    build_country_indicators,
+    get_latest_silver_file,
+)
 
 
 def test_gold_creates_parquet_file(
@@ -103,3 +107,27 @@ def test_gold_excludes_invalid_records(
     total_rows = build_country_indicators(silver_file, gold_file)
 
     assert total_rows == 3
+
+
+def test_gold_discovers_latest_silver_file(tmp_path):
+    silver_dir = tmp_path / "silver"
+    silver_dir.mkdir()
+
+    older = silver_dir / "owid_covid_silver_20261125T100000Z.parquet"
+    newer = silver_dir / "owid_covid_silver_20261126T100000Z.parquet"
+    ignored = silver_dir / "unrelated.parquet"
+
+    older.touch()
+    newer.touch()
+    ignored.touch()
+
+    import os
+    os.utime(older, (100, 100))
+    os.utime(newer, (200, 200))
+
+    assert get_latest_silver_file(silver_dir) == newer
+
+
+def test_gold_raises_when_silver_directory_is_empty(tmp_path):
+    with pytest.raises(FileNotFoundError, match="No Silver Parquet files"):
+        get_latest_silver_file(tmp_path)
