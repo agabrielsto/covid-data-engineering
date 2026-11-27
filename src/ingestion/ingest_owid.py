@@ -8,6 +8,8 @@ import requests
 from dotenv import load_dotenv
 from botocore.config import Config
 
+from src.utils.observability import get_logger, log_stage
+
 
 load_dotenv()
 
@@ -27,6 +29,8 @@ LOCAL_FILE = LOCAL_DIR / FILE_NAME
 OBJECT_KEY = (
     f"owid/covid/ingestion_date={INGESTION_DATE}/{FILE_NAME}"
 )
+
+logger = get_logger(__name__)
 
 s3 = boto3.client(
     "s3",
@@ -98,12 +102,21 @@ def upload_to_bronze():
 
 def main():
     try:
-        download_data()
-        upload_to_bronze()
+        with log_stage(logger, "bronze_ingestion"):
+            with log_stage(logger, "download_owid_csv"):
+                download_data()
+            with log_stage(logger, "upload_bronze_object"):
+                upload_to_bronze()
+
+            logger.info(
+                "event=ingestion_metrics file=%s size_bytes=%d",
+                LOCAL_FILE.name,
+                LOCAL_FILE.stat().st_size,
+            )
         print("Ingestion pipeline completed successfully.")
 
-    except Exception as error:
-        print(f"Ingestion failed: {error}")
+    except Exception:
+        logger.exception("event=pipeline_failed pipeline=bronze_ingestion")
         raise
 
 
