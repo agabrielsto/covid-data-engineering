@@ -4,6 +4,8 @@ from pathlib import Path
 import duckdb
 from dotenv import load_dotenv
 
+from src.utils.observability import get_logger, log_stage
+
 
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
@@ -11,6 +13,7 @@ load_dotenv(dotenv_path=ENV_FILE, override=True)
 GOLD_FILE = Path("data/gold/country_indicators.parquet")
 
 TABLE_NAME = "gold.country_indicators"
+logger = get_logger(__name__)
 
 
 def load_parquet(gold_file: Path = GOLD_FILE):
@@ -42,6 +45,7 @@ def load_parquet(gold_file: Path = GOLD_FILE):
             [str(gold_file)]        
             ).fetchall()
 
+    logger.info("event=gold_read_metrics rows_read=%d source_file=%s", len(rows), gold_file)
     print(f"Records read: {len(rows):,}")
 
     return rows
@@ -158,6 +162,12 @@ def load_into_postgres(
 
         total_rows = cursor.fetchone()[0]
 
+    logger.info(
+        "event=postgres_load_metrics rows_loaded=%d table=%s.%s",
+        total_rows,
+        schema_name,
+        table_name,
+    )
     print(
         f"PostgreSQL load completed: {total_rows:,} records"
     )
@@ -167,13 +177,16 @@ def load_into_postgres(
 
 def main():
     try:
-        rows = load_parquet()
-        load_into_postgres(rows)
+        with log_stage(logger, "postgres_load_pipeline"):
+            with log_stage(logger, "read_gold_parquet"):
+                rows = load_parquet()
+            with log_stage(logger, "load_postgres"):
+                load_into_postgres(rows)
 
         print("Gold to PostgreSQL pipeline completed successfully.")
 
-    except Exception as error:
-        print(f"PostgreSQL load failed: {error}")
+    except Exception:
+        logger.exception("event=pipeline_failed pipeline=postgres_load")
         raise
 
 
