@@ -185,12 +185,12 @@ def transform_data(
 
     cleaned_query = f"""
         CREATE OR REPLACE TEMP TABLE cleaned_data AS
-        {cleaned_ctes{"}"}
+        {CLEANED_CTES.format(source_path=source_path)}
         SELECT *
         FROM cleaned
         WHERE country IS NOT NULL
           AND date IS NOT NULL;
-    """.replace("${cleaned_ctes}", CLEANED_CTES)
+    """
 
     with duckdb.connect() as connection:
         connection.execute(cleaned_query)
