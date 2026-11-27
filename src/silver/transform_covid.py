@@ -97,120 +97,52 @@ def transform_data(
     target_path = target_file.resolve().as_posix().replace("'", "''")
 
     query = f"""
-        COPY (
-            WITH source AS (
-                SELECT *
-                FROM read_csv(
-    '{source_file.resolve().as_posix()}',
-    header = true,
-    delim = ',',
-    quote = '"',
-    escape = '"',
-    all_varchar = true,
-        sample_size = -1
-    )
-),
-cleaned AS (
-    SELECT * REPLACE (
-        NULLIF(TRIM(country), '') AS country,
-        TRY_CAST(date AS DATE) AS date,
-
-        TRY_CAST(total_cases AS DOUBLE) AS total_cases,
-        TRY_CAST(new_cases AS DOUBLE) AS new_cases,
-        TRY_CAST(new_cases_smoothed AS DOUBLE) AS new_cases_smoothed,
-        TRY_CAST(total_cases_per_million AS DOUBLE) AS total_cases_per_million,
-        TRY_CAST(new_cases_per_million AS DOUBLE) AS new_cases_per_million,
-        TRY_CAST(new_cases_smoothed_per_million AS DOUBLE) AS new_cases_smoothed_per_million,
-
-        TRY_CAST(total_deaths AS DOUBLE) AS total_deaths,
-        TRY_CAST(new_deaths AS DOUBLE) AS new_deaths,
-        TRY_CAST(new_deaths_smoothed AS DOUBLE) AS new_deaths_smoothed,
-        TRY_CAST(total_deaths_per_million AS DOUBLE) AS total_deaths_per_million,
-        TRY_CAST(new_deaths_per_million AS DOUBLE) AS new_deaths_per_million,
-        TRY_CAST(new_deaths_smoothed_per_million AS DOUBLE) AS new_deaths_smoothed_per_million,
-
-        TRY_CAST(excess_mortality AS DOUBLE) AS excess_mortality,
-        TRY_CAST(excess_mortality_cumulative AS DOUBLE) AS excess_mortality_cumulative,
-        TRY_CAST(excess_mortality_cumulative_absolute AS DOUBLE) AS excess_mortality_cumulative_absolute,
-        TRY_CAST(excess_mortality_cumulative_per_million AS DOUBLE) AS excess_mortality_cumulative_per_million,
-
-        TRY_CAST(hosp_patients AS DOUBLE) AS hosp_patients,
-        TRY_CAST(hosp_patients_per_million AS DOUBLE) AS hosp_patients_per_million,
-        TRY_CAST(weekly_hosp_admissions AS DOUBLE) AS weekly_hosp_admissions,
-        TRY_CAST(weekly_hosp_admissions_per_million AS DOUBLE) AS weekly_hosp_admissions_per_million,
-        TRY_CAST(icu_patients AS DOUBLE) AS icu_patients,
-        TRY_CAST(icu_patients_per_million AS DOUBLE) AS icu_patients_per_million,
-        TRY_CAST(weekly_icu_admissions AS DOUBLE) AS weekly_icu_admissions,
-        TRY_CAST(weekly_icu_admissions_per_million AS DOUBLE) AS weekly_icu_admissions_per_million,
-
-        TRY_CAST(stringency_index AS DOUBLE) AS stringency_index,
-        TRY_CAST(reproduction_rate AS DOUBLE) AS reproduction_rate,
-
-        TRY_CAST(total_tests AS DOUBLE) AS total_tests,
-        TRY_CAST(new_tests AS DOUBLE) AS new_tests,
-        TRY_CAST(total_tests_per_thousand AS DOUBLE) AS total_tests_per_thousand,
-        TRY_CAST(new_tests_per_thousand AS DOUBLE) AS new_tests_per_thousand,
-        TRY_CAST(new_tests_smoothed AS DOUBLE) AS new_tests_smoothed,
-        TRY_CAST(new_tests_smoothed_per_thousand AS DOUBLE) AS new_tests_smoothed_per_thousand,
-        TRY_CAST(positive_rate AS DOUBLE) AS positive_rate,
-        TRY_CAST(tests_per_case AS DOUBLE) AS tests_per_case,
-
-        TRY_CAST(total_vaccinations AS DOUBLE) AS total_vaccinations,
-        TRY_CAST(people_vaccinated AS DOUBLE) AS people_vaccinated,
-        TRY_CAST(people_fully_vaccinated AS DOUBLE) AS people_fully_vaccinated,
-        TRY_CAST(total_boosters AS DOUBLE) AS total_boosters,
-        TRY_CAST(new_vaccinations AS DOUBLE) AS new_vaccinations,
-        TRY_CAST(new_vaccinations_smoothed AS DOUBLE) AS new_vaccinations_smoothed,
-        TRY_CAST(total_vaccinations_per_hundred AS DOUBLE) AS total_vaccinations_per_hundred,
-        TRY_CAST(people_vaccinated_per_hundred AS DOUBLE) AS people_vaccinated_per_hundred,
-        TRY_CAST(people_fully_vaccinated_per_hundred AS DOUBLE) AS people_fully_vaccinated_per_hundred,
-        TRY_CAST(total_boosters_per_hundred AS DOUBLE) AS total_boosters_per_hundred,
-        TRY_CAST(new_vaccinations_smoothed_per_million AS DOUBLE) AS new_vaccinations_smoothed_per_million,
-        TRY_CAST(new_people_vaccinated_smoothed AS DOUBLE) AS new_people_vaccinated_smoothed,
-        TRY_CAST(new_people_vaccinated_smoothed_per_hundred AS DOUBLE) AS new_people_vaccinated_smoothed_per_hundred,
-
-        TRY_CAST(population AS DOUBLE) AS population,
-        TRY_CAST(population_density AS DOUBLE) AS population_density,
-        TRY_CAST(median_age AS DOUBLE) AS median_age,
-        TRY_CAST(life_expectancy AS DOUBLE) AS life_expectancy,
-        TRY_CAST(gdp_per_capita AS DOUBLE) AS gdp_per_capita,
-        TRY_CAST(extreme_poverty AS DOUBLE) AS extreme_poverty,
-        TRY_CAST(diabetes_prevalence AS DOUBLE) AS diabetes_prevalence,
-        TRY_CAST(handwashing_facilities AS DOUBLE) AS handwashing_facilities,
-        TRY_CAST(hospital_beds_per_thousand AS DOUBLE) AS hospital_beds_per_thousand,
-        TRY_CAST(human_development_index AS DOUBLE) AS human_development_index
-    )
-    FROM source
-),
-            deduplicated AS (
-                SELECT *
-                FROM cleaned
-                WHERE country IS NOT NULL
-                  AND date IS NOT NULL
-                QUALIFY ROW_NUMBER() OVER (
-                    PARTITION BY country, date
-                    ORDER BY country, date
-                ) = 1
-            )
-            SELECT *
-            FROM deduplicated
-        )
-        TO '{target_file.resolve().as_posix()}'
-        (FORMAT PARQUET, COMPRESSION ZSTD);
-    """
+        CREATE OR REPLACE TEMP TABLE cleaned_data AS
+        {cte_placeholder{"}"};
+    """.replace("${cte_placeholder}", cte)
 
     with duckdb.connect() as connection:
         connection.execute(query)
 
-        result = connection.execute(
-            f"SELECT COUNT(*) FROM read_parquet('{target_file.resolve().as_posix()}')"
-        ).fetchone()
+        conflicting_keys = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM (
+                SELECT country, date
+                FROM (SELECT DISTINCT * FROM cleaned_data)
+                GROUP BY country, date
+                HAVING COUNT(*) > 1
+            )
+            """
+        ).fetchone()[0]
 
-    row_count = result[0]
+        if conflicting_keys:
+            raise ValueError(
+                "Conflicting records found for "
+                f"{conflicting_keys} country/date key(s). "
+                "Silver transformation was stopped."
+            )
+
+        connection.execute(
+            f"""
+            COPY (
+                SELECT DISTINCT *
+                FROM cleaned_data
+            )
+            TO '{target_path}'
+            (FORMAT PARQUET, COMPRESSION ZSTD);
+            """
+        )
+
+        row_count = connection.execute(
+            "SELECT COUNT(*) FROM read_parquet(?)",
+            [target_path],
+        ).fetchone()[0]
 
     print(f"Transformation completed: {row_count:,} rows")
     print(f"Output: {target_file}")
     return row_count
+
 
 
 def upload_silver_data():
@@ -253,18 +185,42 @@ def validate_silver_data(file_path):
             [file_path],
         ).fetchone()
 
-    print(f"Total rows: {result[0]:,}")
-    print(f"Total countries: {result[1]:,}")
-    print(f"Date range: {result[2]} to {result[3]}")
-    print(f"Null countries: {result[4]:,}")
-    print(f"Null dates: {result[5]:,}")
-    print(f"Duplicate country/date keys: {result[6]:,}")
+    metrics = {
+        "total_rows": result[0],
+        "total_countries": result[1],
+        "min_date": result[2],
+        "max_date": result[3],
+        "null_countries": result[4],
+        "null_dates": result[5],
+        "duplicate_keys": result[6],
+    }
+
+    for name, value in metrics.items():
+        print(f"{name}: {value}")
+
+    failures = []
+    if metrics["total_rows"] == 0:
+        failures.append("dataset is empty")
+    if metrics["null_countries"]:
+        failures.append("null country values found")
+    if metrics["null_dates"]:
+        failures.append("null date values found")
+    if metrics["duplicate_keys"]:
+        failures.append("duplicate country/date keys found")
+
+    if failures:
+        raise ValueError(
+            "Silver data quality validation failed: " + "; ".join(failures)
+        )
+
+    return metrics
 
 def main():
     try:
         source_key = get_latest_bronze_object()
         download_bronze_data(source_key)
         transform_data()
+        validate_silver_data(LOCAL_TARGET)
         upload_silver_data()
 
         print("Silver pipeline completed successfully.")
