@@ -2,86 +2,91 @@
 
 ## 1. Objetivo
 
-Este documento apresenta as regras e verificações de qualidade aplicadas ao pipeline de dados da COVID-19.
+Este documento registra as regras de qualidade implementadas no pipeline e os testes automatizados utilizados para verificar suas principais etapas. Os resultados de execução devem ser interpretados como uma evidência pontual: novas ingestões podem alterar os dados e as métricas.
 
-O objetivo é garantir que os dados processados sejam consistentes, íntegros e adequados para análises na camada Gold e no PostgreSQL.
+## 2. Regras por camada
 
-## 2. Validações por camada
+### Bronze — ingestão
 
-### Bronze
+O processo de ingestão:
 
-- Verificação da disponibilidade da fonte OWID.
-- Validação da estrutura do arquivo CSV.
-- Verificação da presença das colunas obrigatórias `country` e `date`.
-- Armazenamento do arquivo original no SILO.
+- Verifica se a requisição HTTP foi concluída com sucesso.
+- Confere a presença das colunas obrigatórias `country` e `date` no CSV.
+- Interrompe o processo se a estrutura mínima esperada não estiver presente.
+- Armazena o arquivo original no bucket Bronze, preservando o CSV de origem.
 
-### Silver
+### Silver — tratamento
 
-- Conversão de datas para o tipo DATE.
-- Conversão de colunas numéricas para tipos apropriados.
-- Remoção de registros sem país ou data válidos.
-- Remoção de duplicidades considerando a combinação `country` e `date`.
-- Geração do arquivo Parquet.
+A transformação aplica as seguintes regras:
 
-### Gold
+- Converte `date` para DATE e campos numéricos para DOUBLE usando conversões tolerantes (`TRY_CAST`).
+- Remove linhas sem `country` ou `date` válidos.
+- Identifica duplicatas pela chave lógica `country` + `date`.
+- Remove registros somente quando todas as colunas são idênticas.
+- Interrompe a transformação se a mesma chave país/data possuir registros com valores divergentes.
+- Valida se o Parquet gerado não está vazio e se não há chaves duplicadas ou valores nulos de país/data.
+- Faz o upload para o bucket Silver somente após a transformação e a validação.
 
-- Seleção do registro mais recente de cada país.
-- Exclusão de registros sem país, código ou continente.
-- Cálculo de indicadores por milhão de habitantes.
-- Cálculo da taxa de letalidade.
-- Prevenção de divisões por zero utilizando `NULLIF`.
+### Gold — indicadores
+
+A construção da camada Gold:
+
+- Seleciona a observação mais recente por país.
+- Exclui registros sem país, código ou continente.
+- Calcula casos e mortes por milhão de habitantes.
+- Calcula a taxa de letalidade.
+- Utiliza `NULLIF` para evitar divisão por zero.
 
 ### PostgreSQL
 
-- Verificação da quantidade de registros carregados.
-- Verificação da unicidade dos códigos dos países.
-- Verificação de valores nulos em campos obrigatórios.
-- Verificação de valores negativos em casos e mortes.
-- Verificação de populações inválidas.
+A carga:
 
-## 3. Resultados da validação
+- Cria o schema e a tabela quando ainda não existem.
+- Define o código do país como chave primária.
+- Define país e continente como campos obrigatórios.
+- Substitui o conteúdo anterior da tabela com `TRUNCATE` antes de inserir o novo conjunto.
+- Retorna a quantidade de registros carregados.
 
-Na execução validada do projeto, foram obtidos os seguintes resultados:
+O teste de integração verifica a carga em uma tabela de teste e consulta um registro inserido. Ele não substitui uma auditoria completa de todas as regras de negócio no banco.
 
-| Verificação | Resultado |
-|---|---:|
-| Registros na camada Gold | 239 |
-| Códigos de países distintos | 239 |
-| Países nulos | 0 |
-| Códigos nulos | 0 |
-| Continentes nulos | 0 |
-| Casos negativos | 0 |
-| Mortes negativas | 0 |
-| Populações inválidas | 0 |
+## 3. Testes automatizados
 
-**Período observado na camada Gold:**
+O projeto utiliza Pytest. Os testes estão organizados por etapa:
 
-- Data mais antiga: 20/04/2022.
-- Data mais recente: 18/10/2026.
+| Arquivo | Escopo |
+|---|---|
+| `tests/test_silver.py` | Transformação, duplicatas, conflitos e validação Silver |
+| `tests/test_gold.py` | Geração Gold e descoberta do arquivo Silver |
+| `tests/test_postgres.py` | Leitura do Parquet e integração com PostgreSQL |
+| `tests/test_s3_connection.py` | Conectividade com o armazenamento compatível com S3 |
 
-As datas representam os registros mais recentes disponíveis por país, não necessariamente um intervalo contínuo comum a todos os países.
+### Resultado validado
 
-## 4. Testes automatizados
+Na execução completa do GitHub Actions associada à branch `feature/pipeline-stability-step-1`:
 
-O projeto utiliza Pytest para validar as principais funcionalidades.
+- **17 testes aprovados**
+- **0 testes reprovados**
+- Inicialização do PostgreSQL aprovada
+- Inicialização e verificação de disponibilidade do SILO aprovadas
 
-| Arquivo | Quantidade de testes | Objetivo |
-|---|---:|---|
-| test_silver.py | 4 | Validar limpeza e transformação Silver |
-| test_gold.py | 4 | Validar indicadores e regras Gold |
-| test_postgres.py | 3 | Validar leitura Parquet e integração PostgreSQL |
-| test_s3_connection.py | 1 | Validar conexão com armazenamento S3 |
+O workflow está definido em `.github/workflows/ci.yml`. A execução é feita em ambiente Linux, com os serviços de integração iniciados pelo próprio workflow.
 
-**Resultado da última execução:**
+Para executar os testes localmente:
 
-- Total de testes: 12.
-- Testes aprovados: 12.
-- Testes reprovados: 0.
+```powershell
+python -m pytest -v
+```
 
-## 5. Considerações
+Os testes que dependem de PostgreSQL ou S3 exigem serviços ativos e variáveis de ambiente válidas. Se essas dependências não estiverem configuradas, o teste de integração PostgreSQL poderá ser ignorado conforme a configuração do teste.
 
-As verificações realizadas demonstram que o pipeline atende às regras de qualidade implementadas no projeto.
+## 4. Observabilidade operacional\n\nOs módulos compartilhados de observabilidade registram início, conclusão, duração e exceções de cada etapa. Também são emitidas métricas de volume processado e carregado. Antes da ingestão e da transformação Silver, o pipeline verifica o acesso aos buckets necessários.\n\nOs testes `tests/test_observability.py` e `tests/test_s3_utils.py` verificam os registros de sucesso/falha e o comportamento de validação de buckets.\n\n## 5. Limitações e próximos controles
 
-Os resultados apresentados correspondem à execução validada em 26/11/2026. Novas ingestões ou alterações na fonte podem modificar os indicadores e resultados das verificações.
+As validações atuais cobrem as regras explicitamente descritas acima, mas não representam uma garantia completa de qualidade estatística ou epidemiológica dos dados.
 
-A qualidade dos dados deve ser monitorada continuamente em futuras execuções do pipeline.
+Evoluções recomendadas:
+
+- Validar faixas plausíveis para indicadores e população.
+- Monitorar variações abruptas na quantidade de registros por execução.
+- Registrar métricas de qualidade por data de processamento.
+- Validar a presença e acessibilidade dos buckets esperados antes da ingestão.
+- Ampliar a verificação de consistência entre Parquet Gold e PostgreSQL.

@@ -8,6 +8,9 @@ import duckdb
 from botocore.config import Config
 from dotenv import load_dotenv
 
+from src.utils.observability import get_logger, log_stage
+from src.utils.s3 import validate_bucket_access
+
 
 load_dotenv()
 
@@ -30,6 +33,8 @@ TARGET_KEY = (
     f"{TARGET_PREFIX}processing_date={PROCESSING_DATE}/"
     f"owid_covid_silver_{TIMESTAMP}.parquet"
 )
+
+logger = get_logger(__name__)
 
 s3 = boto3.client(
     "s3",
@@ -77,31 +82,11 @@ def download_bronze_data(object_key):
     print(f"Downloaded: {object_key}")
 
 
-def transform_data(
-    source_file: Path = LOCAL_SOURCE,
-    target_file: Path = LOCAL_TARGET
-):
-    source_file = Path(source_file)
-    target_file = Path(target_file)
-
-    if not source_file.exists():
-        raise FileNotFoundError(
-            f"Bronze dataset not found: {source_file}"
-        )
-
-    target_file.parent.mkdir(parents=True, exist_ok=True)
-
-    print("Starting Silver transformation...")
-
-    source_path = source_file.resolve().as_posix().replace("'", "''")
-    target_path = target_file.resolve().as_posix().replace("'", "''")
-
-    query = f"""
-        COPY (
-            WITH source AS (
+CLEANED_CTES = r"""
+WITH source AS (
                 SELECT *
                 FROM read_csv(
-    '{source_file.resolve().as_posix()}',
+    '{source_path}',
     header = true,
     delim = ',',
     quote = '"',
@@ -181,36 +166,83 @@ cleaned AS (
         TRY_CAST(human_development_index AS DOUBLE) AS human_development_index
     )
     FROM source
-),
-            deduplicated AS (
-                SELECT *
-                FROM cleaned
-                WHERE country IS NOT NULL
-                  AND date IS NOT NULL
-                QUALIFY ROW_NUMBER() OVER (
-                    PARTITION BY country, date
-                    ORDER BY country, date
-                ) = 1
-            )
-            SELECT *
-            FROM deduplicated
+)
+"""
+
+def transform_data(
+    source_file: Path = LOCAL_SOURCE,
+    target_file: Path = LOCAL_TARGET
+):
+    source_file = Path(source_file)
+    target_file = Path(target_file)
+
+    if not source_file.exists():
+        raise FileNotFoundError(
+            f"Bronze dataset not found: {source_file}"
         )
-        TO '{target_file.resolve().as_posix()}'
-        (FORMAT PARQUET, COMPRESSION ZSTD);
+
+    target_file.parent.mkdir(parents=True, exist_ok=True)
+    source_path = source_file.resolve().as_posix().replace("'", "''")
+    target_path = target_file.resolve().as_posix().replace("'", "''")
+
+    print("Starting Silver transformation...")
+
+    cleaned_query = f"""
+        CREATE OR REPLACE TEMP TABLE cleaned_data AS
+        {CLEANED_CTES.format(source_path=source_path)}
+        SELECT *
+        FROM cleaned
+        WHERE country IS NOT NULL
+          AND date IS NOT NULL;
     """
 
     with duckdb.connect() as connection:
-        connection.execute(query)
+        connection.execute(cleaned_query)
 
-        result = connection.execute(
-            f"SELECT COUNT(*) FROM read_parquet('{target_file.resolve().as_posix()}')"
-        ).fetchone()
+        conflicting_keys = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM (
+                SELECT country, date
+                FROM (SELECT DISTINCT * FROM cleaned_data)
+                GROUP BY country, date
+                HAVING COUNT(*) > 1
+            )
+            """
+        ).fetchone()[0]
 
-    row_count = result[0]
+        if conflicting_keys:
+            raise ValueError(
+                "Conflicting records found for "
+                f"{conflicting_keys} country/date key(s). "
+                "Silver transformation was stopped."
+            )
 
+        connection.execute(
+            f"""
+            COPY (
+                SELECT DISTINCT *
+                FROM cleaned_data
+            )
+            TO '{target_path}'
+            (FORMAT PARQUET, COMPRESSION ZSTD);
+            """
+        )
+
+        row_count = connection.execute(
+            "SELECT COUNT(*) FROM read_parquet(?)",
+            [target_path],
+        ).fetchone()[0]
+
+    logger.info(
+        "event=silver_transform_metrics rows_processed=%d output_file=%s",
+        row_count,
+        target_file,
+    )
     print(f"Transformation completed: {row_count:,} rows")
     print(f"Output: {target_file}")
     return row_count
+
 
 
 def upload_silver_data():
@@ -253,24 +285,64 @@ def validate_silver_data(file_path):
             [file_path],
         ).fetchone()
 
-    print(f"Total rows: {result[0]:,}")
-    print(f"Total countries: {result[1]:,}")
-    print(f"Date range: {result[2]} to {result[3]}")
-    print(f"Null countries: {result[4]:,}")
-    print(f"Null dates: {result[5]:,}")
-    print(f"Duplicate country/date keys: {result[6]:,}")
+    metrics = {
+        "total_rows": result[0],
+        "total_countries": result[1],
+        "min_date": result[2],
+        "max_date": result[3],
+        "null_countries": result[4],
+        "null_dates": result[5],
+        "duplicate_keys": result[6],
+    }
+
+    for name, value in metrics.items():
+        print(f"{name}: {value}")
+        logger.info("event=silver_quality_metric metric=%s value=%s", name, value)
+
+    failures = []
+    if metrics["total_rows"] == 0:
+        failures.append("dataset is empty")
+    if metrics["null_countries"]:
+        failures.append("null country values found")
+    if metrics["null_dates"]:
+        failures.append("null date values found")
+    if metrics["duplicate_keys"]:
+        failures.append("duplicate country/date keys found")
+
+    if failures:
+        raise ValueError(
+            "Silver data quality validation failed: " + "; ".join(failures)
+        )
+
+    return metrics
 
 def main():
     try:
-        source_key = get_latest_bronze_object()
-        download_bronze_data(source_key)
-        transform_data()
-        upload_silver_data()
+        with log_stage(logger, "silver_pipeline"):
+            with log_stage(logger, "validate_storage_buckets"):
+                validate_bucket_access(s3, SOURCE_BUCKET)
+                validate_bucket_access(s3, TARGET_BUCKET)
+
+            with log_stage(logger, "discover_bronze_source"):
+                source_key = get_latest_bronze_object()
+                logger.info("event=source_selected bucket=%s object_key=%s", SOURCE_BUCKET, source_key)
+
+            with log_stage(logger, "download_bronze_source"):
+                download_bronze_data(source_key)
+
+            with log_stage(logger, "transform_silver"):
+                transform_data()
+
+            with log_stage(logger, "validate_silver"):
+                validate_silver_data(LOCAL_TARGET)
+
+            with log_stage(logger, "upload_silver"):
+                upload_silver_data()
 
         print("Silver pipeline completed successfully.")
 
-    except Exception as error:
-        print(f"Silver pipeline failed: {error}")
+    except Exception:
+        logger.exception("event=pipeline_failed pipeline=silver")
         raise
 
 

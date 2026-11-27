@@ -1,17 +1,8 @@
 # COVID-19 Data Engineering
 
-Pipeline de Engenharia de Dados desenvolvido em Python para ingestão, processamento, transformação e armazenamento de dados globais da COVID-19, utilizando arquitetura Medallion (Bronze, Silver e Gold).
+Pipeline de Engenharia de Dados desenvolvido em Python para ingestão, processamento, transformação e disponibilização de dados globais sobre a COVID-19. O projeto utiliza a arquitetura Medallion (Bronze, Silver e Gold), com dados do [Our World in Data (OWID)](https://ourworldindata.org/coronavirus).
 
-O projeto utiliza dados do [Our World in Data (OWID)](https://ourworldindata.org/coronavirus) e constrói uma camada analítica preparada para consultas SQL e visualização no Power BI.
-
-## Objetivos
-
-- Desenvolver um pipeline ETL completo.
-- Aplicar arquitetura Medallion.
-- Praticar processamento de dados com DuckDB e SQL.
-- Implementar armazenamento de objetos compatível com S3.
-- Construir uma camada analítica em PostgreSQL.
-- Aplicar testes automatizados e validações de qualidade.
+O objetivo é demonstrar um fluxo ETL completo, boas práticas de qualidade de dados, armazenamento em objeto compatível com S3, processamento analítico e integração com PostgreSQL. A conexão com o Power BI faz parte da etapa de visualização do projeto.
 
 ## Arquitetura
 
@@ -19,213 +10,245 @@ O projeto utiliza dados do [Our World in Data (OWID)](https://ourworldindata.org
 Our World in Data (OWID)
           |
           v
-    Python Ingestion
+Python — ingestão
           |
           v
-   Bronze — CSV
-      (SILO/S3)
+Bronze — CSV original
           |
           v
-   DuckDB Processing
+SILO (armazenamento compatível com S3)
           |
           v
-   Silver — Parquet
-      (SILO/S3)
+DuckDB + SQL — limpeza e validação
           |
           v
-   DuckDB + SQL
+Silver — Parquet
           |
           v
-    Gold — Parquet
+DuckDB + SQL — indicadores por país
           |
           v
-    Python + Psycopg
+Gold — Parquet
           |
           v
-   PostgreSQL
+Python + Psycopg
           |
           v
-      Power BI
+PostgreSQL — gold.country_indicators
+          |
+          v
+Power BI — camada de visualização
 ```
 
-## Tecnologias utilizadas
+## Tecnologias
 
-| Tecnologia | Aplicação |
+| Tecnologia | Utilização |
 |---|---|
-| Python | Desenvolvimento do pipeline ETL |
-| SQL | Consultas e transformações |
-| DuckDB | Processamento analítico |
+| Python | Ingestão, transformação e integração |
+| SQL | Consultas e regras de transformação |
+| DuckDB | Processamento analítico e geração de Parquet |
 | Pandas | Análise exploratória |
-| PostgreSQL | Armazenamento analítico |
-| Psycopg | Integração Python/PostgreSQL |
-| SILO | Armazenamento compatível com S3 |
-| Docker | Infraestrutura em containers |
+| Parquet | Armazenamento colunar |
+| SILO | Armazenamento de objetos compatível com S3 |
+| Boto3 | Comunicação com a API S3 |
+| PostgreSQL | Armazenamento da camada analítica |
+| Psycopg | Conexão Python/PostgreSQL |
+| Docker Compose | Execução dos serviços PostgreSQL e SILO |
 | Pytest | Testes automatizados |
-| Power BI | Visualização dos indicadores (próxima etapa) |
+| GitHub Actions | Integração contínua |
+| Power BI | Visualização dos indicadores (etapa de integração) |
 
-## Estrutura do projeto
+## Estrutura do repositório
 
 ```text
 covid-data-engineering/
-│
-├── src/
-│   ├── ingestion/
-│   ├── silver/
-│   ├── gold/
-│   ├── analysis/
-│   └── utils/
-│
-├── tests/
-│   ├── test_gold.py
-│   ├── test_postgres.py
-│   ├── test_s3_connection.py
-│   └── test_silver.py
-│
-├── sql/
-│   ├── 01_create_schema.sql
-│   ├── 02_validation_queries.sql
-│   └── 03_analysis_queries.sql
-│
+├── .github/
+│   └── workflows/
+│       └── ci.yml
+├── data/                  # Dados locais (não versionados)
 ├── docs/
 │   ├── architecture.md
 │   ├── data_dictionary.md
 │   └── data_quality.md
-│
-├── data/
-├── docker/
+├── scripts/
+│   └── inspect_silver.py
+├── sql/
+│   ├── 01_create_schema.sql
+│   ├── 02_validation_queries.sql
+│   └── 03_analysis_queries.sql
+├── src/
+│   ├── analysis/
+│   ├── gold/
+│   ├── ingestion/
+│   └── silver/
+├── tests/
+│   ├── conftest.py
+│   ├── test_gold.py
+│   ├── test_postgres.py
+│   ├── test_s3_connection.py
+│   └── test_silver.py
+├── .env.example
 ├── docker-compose.yml
 ├── requirements.txt
-├── .env.example
-├── .gitignore
 └── README.md
 ```
 
-## Camadas de dados
+## Fluxo de dados
 
-### Bronze
+### 1. Bronze — ingestão
 
-- Ingestão dos dados do OWID.
-- Preservação do arquivo original em CSV.
-- Armazenamento no SILO, em bucket compatível com S3.
+O script `src/ingestion/ingest_owid.py`:
 
-### Silver
+- Baixa o CSV compacto disponibilizado pelo OWID.
+- Confere a presença das colunas obrigatórias `country` e `date`.
+- Salva uma cópia local em `data/bronze/`.
+- Envia o arquivo original para o bucket `bronze` no armazenamento S3.
 
-- Leitura e processamento com DuckDB.
-- Conversão e padronização de tipos.
-- Remoção de duplicidades.
-- Tratamento de registros inválidos.
-- Armazenamento em Parquet.
+### 2. Silver — tratamento
 
-### Gold
+O script `src/silver/transform_covid.py`:
 
-- Seleção do registro mais recente por país.
-- Cálculo de indicadores epidemiológicos.
-- Geração de dataset analítico em Parquet.
-- Preparação dos dados para consultas e visualização.
+- Localiza o objeto CSV mais recente na camada Bronze.
+- Faz o download para processamento local.
+- Utiliza DuckDB e SQL para converter datas e campos numéricos.
+- Descarta registros sem país ou data válidos.
+- Remove apenas duplicatas integralmente idênticas.
+- Interrompe a transformação quando encontra registros diferentes para a mesma chave `country` + `date`.
+- Gera um arquivo Parquet e valida campos obrigatórios e unicidade da chave antes do upload para o bucket `silver`.
 
-## Indicadores analíticos
+### 3. Gold — indicadores
 
-A camada Gold disponibiliza:
+O script `src/gold/build_country_indicators.py`:
 
-- Total acumulado de casos.
-- Total acumulado de mortes.
-- População.
-- Casos por milhão de habitantes.
-- Mortes por milhão de habitantes.
-- Taxa de letalidade.
+- Identifica o arquivo Parquet Silver mais recentemente modificado.
+- Seleciona o registro mais recente de cada país.
+- Calcula indicadores por milhão de habitantes e taxa de letalidade.
+- Gera `data/gold/country_indicators.parquet`.
 
-A tabela analítica final é `gold.country_indicators`, armazenada no PostgreSQL.
+### 4. PostgreSQL — disponibilização analítica
 
-## Qualidade e testes
+O script `src/gold/load_gold_postgres.py` lê o Parquet Gold e carrega os registros na tabela `gold.country_indicators`. A conexão utiliza as variáveis de ambiente definidas no arquivo `.env`.
 
-O projeto utiliza Pytest para validar as transformações e a integração com os serviços de armazenamento.
+### 5. Power BI — visualização
 
-**Última execução validada:**
+O PostgreSQL é a fonte planejada para o modelo analítico no Power BI. A construção e finalização do dashboard são etapas de evolução do projeto; não são apresentadas aqui como concluídas.
 
-- 12 testes aprovados.
-- 0 testes reprovados.
-- 239 registros na camada Gold.
-- 239 códigos de países distintos.
+## Indicadores da camada Gold
 
-Para executar os testes:
+A tabela `gold.country_indicators` contém um registro por país, considerando a observação mais recente disponível:
 
-```bash
-python -m pytest -v
-```
+| Campo | Descrição |
+|---|---|
+| `country` | País ou território |
+| `code` | Código do país |
+| `continent` | Continente |
+| `last_updated` | Data da observação selecionada |
+| `total_cases` | Total acumulado de casos |
+| `total_deaths` | Total acumulado de mortes |
+| `population` | População de referência |
+| `cases_per_million` | Casos por milhão de habitantes |
+| `deaths_per_million` | Mortes por milhão de habitantes |
+| `fatality_rate` | Mortes como percentual dos casos |
 
-## Como executar o projeto
+Consulte o [dicionário de dados](docs/data_dictionary.md) para definições e fórmulas.
+
+## Como executar localmente
+
+### Pré-requisitos
+
+- Git
+- Python 3.14
+- Docker Desktop com Docker Compose
+- Acesso à internet para obter os dados do OWID
 
 ### 1. Clonar o repositório
 
-```bash
-git clone <URL_DO_REPOSITORIO>
+```powershell
+git clone https://github.com/agabrielsto/covid-data-engineering.git
 cd covid-data-engineering
 ```
 
-### 2. Criar ambiente virtual
-
-```bash
-python -m venv .venv
-```
-
-Ativar no Windows PowerShell:
+### 2. Criar e ativar o ambiente virtual
 
 ```powershell
+python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
 
 ### 3. Instalar dependências
 
-```bash
+```powershell
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 4. Configurar variáveis de ambiente
+### 4. Configurar as variáveis de ambiente
 
-Crie um arquivo `.env` na raiz do projeto, utilizando `.env.example` como referência.
+Crie o arquivo `.env` a partir do modelo:
 
-Configure as credenciais do SILO e PostgreSQL conforme sua infraestrutura local.
+```powershell
+Copy-Item .env.example .env
+```
 
-### 5. Inicializar os serviços
+Edite o `.env` com credenciais locais. Não compartilhe nem versione esse arquivo. O `.env.example` contém apenas valores ilustrativos.
 
-```bash
+### 5. Iniciar PostgreSQL e SILO
+
+```powershell
 docker compose up -d
+docker compose ps
 ```
 
-### 6. Executar o pipeline
+O PostgreSQL fica disponível na porta definida em `PG_PORT`. O endpoint S3 do SILO utiliza a porta 9000 e o console web utiliza a porta 9001.
 
-Execute os scripts na seguinte ordem:
+Antes da ingestão, crie no console do SILO os buckets `bronze` e `silver`, usando as credenciais configuradas no `.env`.
 
-```bash
-python src/ingestion/ingest_owid.py
-python src/silver/transform_covid.py
-python src/gold/build_country_indicators.py
-python src/gold/load_gold_postgres.py
+### 6. Executar as etapas do pipeline
+
+Execute os comandos na ordem:
+
+```powershell
+python -m src.ingestion.ingest_owid
+python -m src.silver.transform_covid
+python -m src.gold.build_country_indicators
+python -m src.gold.load_gold_postgres
 ```
+
+Cada etapa depende dos artefatos gerados pela etapa anterior. A ingestão e a transformação Silver também dependem dos buckets S3 estarem disponíveis.
 
 ### 7. Executar os testes
 
-```bash
+```powershell
 python -m pytest -v
 ```
 
-## Documentação
+Os testes de integração com PostgreSQL e S3 precisam dos serviços e das variáveis de ambiente correspondentes. A integração contínua executa a suíte em Linux com PostgreSQL e SILO inicializados como serviços.
 
-Documentação técnica disponível em `docs/`:
+## Observabilidade\n\nO módulo `src/utils/observability.py` padroniza logs com data/hora, nível e nome do módulo. Cada etapa registra início, conclusão, duração em segundos e exceções com rastreamento. As etapas também registram métricas operacionais, como quantidade de linhas processadas ou carregadas.\n\nO módulo `src/utils/s3.py` verifica a disponibilidade e o acesso aos buckets necessários antes da ingestão e transformação Silver. O nível de log pode ser ajustado pela variável opcional `LOG_LEVEL` (por exemplo, `INFO` ou `DEBUG`).\n\nOs scripts devem ser executados como módulos (`python -m ...`) a partir da raiz do repositório para manter os imports do pacote `src` consistentes.\n\n## Testes e integração contínua
 
-- [Arquitetura](docs/architecture.md)
+A suíte automatizada é executada pelo Pytest. No estado atual da branch de desenvolvimento, a execução completa validada no GitHub Actions apresentou:
+
+- **17 testes aprovados**
+- **0 falhas**
+- Serviços PostgreSQL e SILO inicializados com sucesso
+- Etapa de testes concluída com sucesso
+
+O workflow está em `.github/workflows/ci.yml` e é executado em pushes para `master` e branches `feature/**`, além de pull requests direcionados à `master`.
+
+## Documentação adicional
+
+- [Arquitetura técnica](docs/architecture.md)
 - [Dicionário de dados](docs/data_dictionary.md)
-- [Qualidade dos dados](docs/data_quality.md)
-
-Consultas SQL disponíveis em `sql/`.
+- [Regras e validações de qualidade](docs/data_quality.md)
+- [Consultas SQL](sql/)
 
 ## Próximas evoluções
 
-- Construção de dashboard interativo no Power BI.
-- Aprimoramento do monitoramento e logging.
-- Ampliação das validações de qualidade.
-- Implementação futura de orquestração automatizada.
+- Concluir o modelo e o dashboard no Power BI.
+- Expandir testes de qualidade e integração.
+- Melhorar logging, observabilidade e tratamento de falhas.
+- Avaliar uma ferramenta de orquestração para agendamento do pipeline.
 
 ---
 
-**Projeto desenvolvido para fins de aprendizado e portfólio em Engenharia de Dados.**
+Projeto de portfólio desenvolvido para praticar e demonstrar competências em Engenharia de Dados.
