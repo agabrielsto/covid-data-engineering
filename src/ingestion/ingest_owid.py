@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from botocore.config import Config
 
 from src.utils.observability import get_logger, log_stage
+from src.utils.s3 import validate_bucket_access
 
 
 load_dotenv()
@@ -103,6 +104,8 @@ def upload_to_bronze():
 def main():
     try:
         with log_stage(logger, "bronze_ingestion"):
+            with log_stage(logger, "validate_bronze_bucket"):
+                validate_bucket_access(s3, BUCKET_NAME)
             with log_stage(logger, "download_owid_csv"):
                 download_data()
             with log_stage(logger, "upload_bronze_object"):
