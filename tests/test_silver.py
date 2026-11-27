@@ -1,5 +1,5 @@
 import pytest
-from src.silver.transform_covid import transform_data
+from src.silver.transform_covid import transform_data, validate_silver_data
 
 
 def test_silver_creates_parquet_file(tmp_path):
@@ -285,6 +285,8 @@ def test_silver_blocks_conflicting_country_date_records(tmp_path):
     with pytest.raises(ValueError, match="Conflicting records found"):
         transform_data(source_file, target_file)
 
+    assert not target_file.exists()
+
 def test_silver_removes_invalid_records(tmp_path):
     source_file = tmp_path / "bronze.csv"
     target_file = tmp_path / "silver.parquet"
@@ -352,3 +354,54 @@ def test_silver_removes_invalid_records(tmp_path):
     total_rows = transform_data(source_file, target_file)
 
     assert total_rows == 1
+
+def test_silver_validation_returns_metrics(tmp_path):
+    import duckdb
+
+    parquet_file = tmp_path / "silver.parquet"
+
+    with duckdb.connect() as connection:
+        connection.execute(
+            """
+            COPY (
+                SELECT
+                    'Brazil' AS country,
+                    DATE '2026-10-18' AS date
+            )
+            TO ?
+            (FORMAT PARQUET)
+            """,
+            [str(parquet_file)],
+        )
+
+    metrics = validate_silver_data(parquet_file)
+
+    assert metrics["total_rows"] == 1
+    assert metrics["total_countries"] == 1
+    assert metrics["null_countries"] == 0
+    assert metrics["null_dates"] == 0
+    assert metrics["duplicate_keys"] == 0
+
+
+def test_silver_validation_rejects_empty_dataset(tmp_path):
+    import duckdb
+
+    parquet_file = tmp_path / "empty.parquet"
+
+    with duckdb.connect() as connection:
+        connection.execute(
+            """
+            COPY (
+                SELECT
+                    CAST(NULL AS VARCHAR) AS country,
+                    CAST(NULL AS DATE) AS date
+                WHERE FALSE
+            )
+            TO ?
+            (FORMAT PARQUET)
+            """,
+            [str(parquet_file)],
+        )
+
+    with pytest.raises(ValueError, match="dataset is empty"):
+        validate_silver_data(parquet_file)
