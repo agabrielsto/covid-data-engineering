@@ -61,6 +61,7 @@ def test_load_into_postgres():
     psycopg = pytest.importorskip(
         "psycopg",
         reason="PostgreSQL integration test requires a working psycopg installation",
+        exc_type=ImportError,
     )
 
     rows = [
