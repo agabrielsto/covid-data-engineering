@@ -1,7 +1,5 @@
 """S3-compatible storage preflight checks."""
 
-import logging
-
 from src.utils.observability import get_logger
 
 
