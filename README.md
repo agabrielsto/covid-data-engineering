@@ -208,10 +208,10 @@ Antes da ingestão, crie no console do SILO os buckets `bronze` e `silver`, usan
 Execute os comandos na ordem:
 
 ```powershell
-python src/ingestion/ingest_owid.py
-python src/silver/transform_covid.py
-python src/gold/build_country_indicators.py
-python src/gold/load_gold_postgres.py
+python -m src.ingestion.ingest_owid
+python -m src.silver.transform_covid
+python -m src.gold.build_country_indicators
+python -m src.gold.load_gold_postgres
 ```
 
 Cada etapa depende dos artefatos gerados pela etapa anterior. A ingestão e a transformação Silver também dependem dos buckets S3 estarem disponíveis.
@@ -224,7 +224,7 @@ python -m pytest -v
 
 Os testes de integração com PostgreSQL e S3 precisam dos serviços e das variáveis de ambiente correspondentes. A integração contínua executa a suíte em Linux com PostgreSQL e SILO inicializados como serviços.
 
-## Testes e integração contínua
+## Observabilidade\n\nO módulo `src/utils/observability.py` padroniza logs com data/hora, nível e nome do módulo. Cada etapa registra início, conclusão, duração em segundos e exceções com rastreamento. As etapas também registram métricas operacionais, como quantidade de linhas processadas ou carregadas.\n\nO módulo `src/utils/s3.py` verifica a disponibilidade e o acesso aos buckets necessários antes da ingestão e transformação Silver. O nível de log pode ser ajustado pela variável opcional `LOG_LEVEL` (por exemplo, `INFO` ou `DEBUG`).\n\nOs scripts devem ser executados como módulos (`python -m ...`) a partir da raiz do repositório para manter os imports do pacote `src` consistentes.\n\n## Testes e integração contínua
 
 A suíte automatizada é executada pelo Pytest. No estado atual da branch de desenvolvimento, a execução completa validada no GitHub Actions apresentou:
 
