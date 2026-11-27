@@ -9,6 +9,7 @@ from botocore.config import Config
 from dotenv import load_dotenv
 
 from src.utils.observability import get_logger, log_stage
+from src.utils.s3 import validate_bucket_access
 
 
 load_dotenv()
@@ -318,6 +319,10 @@ def validate_silver_data(file_path):
 def main():
     try:
         with log_stage(logger, "silver_pipeline"):
+            with log_stage(logger, "validate_storage_buckets"):
+                validate_bucket_access(s3, SOURCE_BUCKET)
+                validate_bucket_access(s3, TARGET_BUCKET)
+
             with log_stage(logger, "discover_bronze_source"):
                 source_key = get_latest_bronze_object()
                 logger.info("event=source_selected bucket=%s object_key=%s", SOURCE_BUCKET, source_key)
