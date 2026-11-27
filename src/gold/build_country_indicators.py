@@ -2,10 +2,13 @@ from pathlib import Path
 
 import duckdb
 
+from src.utils.observability import get_logger, log_stage
+
 
 SILVER_DIR = Path("data/silver")
 SILVER_PATTERN = "owid_covid_silver_*.parquet"
 GOLD_FILE = Path("data/gold/country_indicators.parquet")
+logger = get_logger(__name__)
 
 
 def get_latest_silver_file(silver_dir: Path = SILVER_DIR) -> Path:
@@ -93,6 +96,12 @@ def build_country_indicators(
             """
         ).fetchone()[0]
 
+    logger.info(
+        "event=gold_build_metrics countries=%d output_file=%s source_file=%s",
+        total_rows,
+        gold_file,
+        silver_file,
+    )
     print(f"Gold transformation completed: {total_rows:,} countries")
     print(f"Output: {gold_file}")
 
@@ -101,11 +110,13 @@ def build_country_indicators(
 
 def main():
     try:
-        build_country_indicators()
+        with log_stage(logger, "gold_pipeline"):
+            with log_stage(logger, "build_country_indicators"):
+                build_country_indicators()
         print("Gold pipeline completed successfully.")
 
-    except Exception as error:
-        print(f"Gold pipeline failed: {error}")
+    except Exception:
+        logger.exception("event=pipeline_failed pipeline=gold")
         raise
 
 
