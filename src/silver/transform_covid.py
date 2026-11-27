@@ -8,6 +8,8 @@ import duckdb
 from botocore.config import Config
 from dotenv import load_dotenv
 
+from src.utils.observability import get_logger, log_stage
+
 
 load_dotenv()
 
@@ -30,6 +32,8 @@ TARGET_KEY = (
     f"{TARGET_PREFIX}processing_date={PROCESSING_DATE}/"
     f"owid_covid_silver_{TIMESTAMP}.parquet"
 )
+
+logger = get_logger(__name__)
 
 s3 = boto3.client(
     "s3",
@@ -229,6 +233,11 @@ def transform_data(
             [target_path],
         ).fetchone()[0]
 
+    logger.info(
+        "event=silver_transform_metrics rows_processed=%d output_file=%s",
+        row_count,
+        target_file,
+    )
     print(f"Transformation completed: {row_count:,} rows")
     print(f"Output: {target_file}")
     return row_count
@@ -287,6 +296,7 @@ def validate_silver_data(file_path):
 
     for name, value in metrics.items():
         print(f"{name}: {value}")
+        logger.info("event=silver_quality_metric metric=%s value=%s", name, value)
 
     failures = []
     if metrics["total_rows"] == 0:
@@ -307,16 +317,27 @@ def validate_silver_data(file_path):
 
 def main():
     try:
-        source_key = get_latest_bronze_object()
-        download_bronze_data(source_key)
-        transform_data()
-        validate_silver_data(LOCAL_TARGET)
-        upload_silver_data()
+        with log_stage(logger, "silver_pipeline"):
+            with log_stage(logger, "discover_bronze_source"):
+                source_key = get_latest_bronze_object()
+                logger.info("event=source_selected bucket=%s object_key=%s", SOURCE_BUCKET, source_key)
+
+            with log_stage(logger, "download_bronze_source"):
+                download_bronze_data(source_key)
+
+            with log_stage(logger, "transform_silver"):
+                transform_data()
+
+            with log_stage(logger, "validate_silver"):
+                validate_silver_data(LOCAL_TARGET)
+
+            with log_stage(logger, "upload_silver"):
+                upload_silver_data()
 
         print("Silver pipeline completed successfully.")
 
-    except Exception as error:
-        print(f"Silver pipeline failed: {error}")
+    except Exception:
+        logger.exception("event=pipeline_failed pipeline=silver")
         raise
 
 
