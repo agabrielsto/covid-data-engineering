@@ -160,7 +160,7 @@ O workflow `.github/workflows/ci.yml` executa a suíte em Linux e inicializa Pos
 
 As regras de qualidade e o escopo dos testes estão detalhados em [data_quality.md](data_quality.md).
 
-## 7. Decisões e limitações atuais
+## 7. Observabilidade\n\nOs módulos compartilhados em `src/utils/` fornecem recursos básicos de observabilidade:\n\n- Logs padronizados com timestamp, nível e nome do módulo.\n- Registro de início, conclusão e duração de cada etapa.\n- Registro de exceções com stack trace e propagação do erro para não mascarar falhas.\n- Métricas operacionais de linhas processadas, países gerados e linhas carregadas no PostgreSQL.\n- Verificação de acesso aos buckets Bronze e Silver antes do processamento correspondente.\n\nO nível de log pode ser configurado pela variável opcional `LOG_LEVEL`.\n\n## 8. Decisões e limitações atuais
 
 - O projeto mantém Bronze como cópia do CSV original, enquanto Silver e Gold são produzidos em Parquet.
 - A transformação Silver bloqueia conflitos de chave em vez de escolher arbitrariamente um registro.
@@ -170,7 +170,7 @@ As regras de qualidade e o escopo dos testes estão detalhados em [data_quality.
 - O Power BI é a camada de visualização planejada, ainda em desenvolvimento.
 - Não há orquestrador de tarefas implementado nesta versão.
 
-## 8. Evoluções planejadas
+## 9. Evoluções planejadas
 
 - Concluir o modelo semântico e o dashboard no Power BI.
 - Implementar logging estruturado e métricas por execução.
