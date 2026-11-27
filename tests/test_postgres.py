@@ -58,6 +58,22 @@ from src.gold.load_gold_postgres import load_into_postgres
 
 
 def test_load_into_postgres():
+    required_vars = [
+        "PG_HOST",
+        "PG_PORT",
+        "PG_DATABASE",
+        "PG_USER",
+        "PG_PASSWORD",
+    ]
+    missing_vars = [
+        var for var in required_vars
+        if not os.getenv(var)
+    ]
+    if missing_vars:
+        pytest.skip(
+            f"PostgreSQL integration test requires environment variables: {missing_vars}"
+        )
+
     psycopg = pytest.importorskip(
         "psycopg",
         reason="PostgreSQL integration test requires a working psycopg installation",
