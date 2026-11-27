@@ -1,10 +1,7 @@
 
 import os
 from pathlib import Path
-from psycopg import sql
-
 import duckdb
-import psycopg
 from dotenv import load_dotenv
 
 
@@ -76,6 +73,10 @@ def load_into_postgres(
     table_name="country_indicators"
 ):
     print("Connecting to PostgreSQL...")
+
+    # Load the PostgreSQL driver only when this function is actually used.
+    import psycopg
+    from psycopg import sql
 
     if connection is None:
         with psycopg.connect(
