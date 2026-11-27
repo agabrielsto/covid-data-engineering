@@ -368,10 +368,9 @@ def test_silver_validation_returns_metrics(tmp_path):
                     'Brazil' AS country,
                     DATE '2026-10-18' AS date
             )
-            TO ?
+            TO '{parquet_file.as_posix()}'
             (FORMAT PARQUET)
-            """,
-            [str(parquet_file)],
+            """
         )
 
     metrics = validate_silver_data(parquet_file)
