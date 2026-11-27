@@ -161,8 +161,7 @@ cleaned AS (
         TRY_CAST(human_development_index AS DOUBLE) AS human_development_index
     )
     FROM source
-),
-
+)
 """
 
 def transform_data(
