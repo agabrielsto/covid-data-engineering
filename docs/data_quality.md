@@ -79,7 +79,7 @@ python -m pytest -v
 
 Os testes que dependem de PostgreSQL ou S3 exigem serviços ativos e variáveis de ambiente válidas. Se essas dependências não estiverem configuradas, o teste de integração PostgreSQL poderá ser ignorado conforme a configuração do teste.
 
-## 4. Limitações e próximos controles
+## 4. Observabilidade operacional\n\nOs módulos compartilhados de observabilidade registram início, conclusão, duração e exceções de cada etapa. Também são emitidas métricas de volume processado e carregado. Antes da ingestão e da transformação Silver, o pipeline verifica o acesso aos buckets necessários.\n\nOs testes `tests/test_observability.py` e `tests/test_s3_utils.py` verificam os registros de sucesso/falha e o comportamento de validação de buckets.\n\n## 5. Limitações e próximos controles
 
 As validações atuais cobrem as regras explicitamente descritas acima, mas não representam uma garantia completa de qualidade estatística ou epidemiológica dos dados.
 
