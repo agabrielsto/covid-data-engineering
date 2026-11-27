@@ -8,24 +8,6 @@ from dotenv import load_dotenv
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 load_dotenv(dotenv_path=ENV_FILE, override=True)
-required_vars = [
-    "PG_HOST",
-    "PG_PORT",
-    "PG_DATABASE",
-    "PG_USER",
-    "PG_PASSWORD"
-]
-
-missing_vars = [
-    var for var in required_vars
-    if not os.getenv(var)
-]
-
-if missing_vars:
-    raise EnvironmentError(
-        f"Missing environment variables: {missing_vars}"
-    )
-
 GOLD_FILE = Path("data/gold/country_indicators.parquet")
 
 TABLE_NAME = "gold.country_indicators"
@@ -79,6 +61,22 @@ def load_into_postgres(
     from psycopg import sql
 
     if connection is None:
+        required_vars = [
+            "PG_HOST",
+            "PG_PORT",
+            "PG_DATABASE",
+            "PG_USER",
+            "PG_PASSWORD",
+        ]
+        missing_vars = [
+            var for var in required_vars
+            if not os.getenv(var)
+        ]
+        if missing_vars:
+            raise EnvironmentError(
+                f"Missing environment variables: {missing_vars}"
+            )
+
         with psycopg.connect(
             host=os.getenv("PG_HOST"),
             port=os.getenv("PG_PORT"),
